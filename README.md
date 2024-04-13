@@ -122,7 +122,6 @@ manually verify that each produced adversarial example is valid under the JSON d
 ```
 
 
-
 ## Credits
 1. `nlohmann/json*`: https://github.com/nlohmann/json.
 2. `.clang-format`: https://cs.chromium.org/chromium/src/.clang-format.

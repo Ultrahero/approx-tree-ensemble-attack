@@ -43,35 +43,47 @@ std::map<int, std::vector<Point>> LoadMilpAdv(
   return std::move(milp_adv);
 }
 
-void BenchmarkDistortion(const Config& config) {
+struct AdvExampleReturn{
+  double runtime;
+  std::map<int,double> norm_sums;
+  int actual_num_examples;
+  std::map<int,double>* best_norms;
+  std::vector<double> best_hamming_dists;
+  std::vector<double> best_neighbor_dists;
+};
+
+/*
+ * Generates Adversarial examples for the given config and writes them into the given vector adv_examples
+ * Returns some stats on the process
+*/
+AdvExampleReturn GenerateAdvExamples(const Config& config, std::vector<std::pair<int, Point>>* const adv_examples){
   using namespace std::chrono;
   srand(0);
 
-  Timing::Instance()->SetCollectHistogram(config.collect_histogram);
-
-  cout << "Benchmarking model_path:" << config.model_path
+  if(config.verbosity) cout << "Benchmarking model_path:" << config.model_path
        << " inputs_path:" << config.inputs_path << endl;
 
-  cout << "Loading model..." << endl;
+  if(config.verbosity) cout << "Loading model..." << endl;
   auto attack = std::make_unique<NeighborAttack>(config);
   attack->LoadForestFromJson(config.model_path);
 
-  cout << "Loading inputs..." << endl;
+  if(config.verbosity) cout << "Loading inputs..." << endl;
   auto parsed_data = cz::LoadSVMFile(config.inputs_path.c_str(),
                                      config.num_features, config.feature_start);
 
   bool verify_hamming = !config.milp_adv.empty();
   std::map<int, std::vector<Point>> milp_adv;
-  std::vector<int> best_hamming_dists;
-  std::vector<int> best_neighbor_dists;
+  std::vector<double> best_hamming_dists;
+  std::vector<double> best_neighbor_dists;
   if (verify_hamming) {
     milp_adv = LoadMilpAdv(config.milp_adv);
-    cout << "Got milp advs: " << milp_adv.size() << endl;
-    cout << " Adv size: " << milp_adv[0][0].Size() << endl;
+    if(config.verbosity){
+      cout << "Got milp advs: " << milp_adv.size() << endl;
+      cout << " Adv size: " << milp_adv[0][0].Size() << endl;
+    }
   }
 
   bool log_adv_training_examples = !config.adv_training_path.empty();
-  std::vector<std::pair<int, Point>> adv_training_examples;
 
   Timing::Instance()->StartTimer("Total Time");
   auto start_timer = high_resolution_clock::now();
@@ -81,28 +93,36 @@ void BenchmarkDistortion(const Config& config) {
     norm_sums[np] = 0;
 
   int actual_num_example = 0;
+  std::map<int,double> best_dist;
   int max_row =
       std::min((int)parsed_data.size(), config.offset + config.num_point);
+  std::map<int, double> best_norms[max_row - config.offset];
   for (int row = config.offset; row < max_row; ++row) {
     int i = row - config.offset + 1;
 
     const auto& data = parsed_data[row];
-
-    cout << "Running testing example at line " << i << endl;
+    
     int y_pred = attack->PredictLabel(data.second);
-    cout << "Checking if the point is correctly classified..." << endl;
-    cout << "Correct label:" << data.first << " Predict Label:" << y_pred
-         << endl;
-    if (data.first != y_pred) {
-      cout << "Mis-classified point, skipping...";
-      continue;
+    if(config.verbosity){
+      cout << "Running testing example at line " << i << endl;
+      cout << "Checking if the point is correctly classified..." << endl;
+      cout << "Correct label:" << data.first << " Predict Label:" << y_pred
+          << endl;
+      if (data.first != y_pred) {
+        cout << "Mis-classified point, skipping...";
+        continue;
+      }
+      cout << "Correctly classified point, attacking...";
+      cout << "Progress " << i << "/" << config.num_point
+          << endl;
+    }else{
+      if(data.first != y_pred) continue;
     }
-    cout << "Correctly classified point, attacking...";
-    cout << "Progress " << i << "/" << config.num_point
-         << endl;
+    
 
     auto result = attack->FindAdversarialPoint(data.second);
     bool is_success = result.success();
+    best_norms[i] = result.best_norms;
 
     if (!result.success()) {
       printf("!!!Failed on example %d\n", i);
@@ -156,18 +176,20 @@ void BenchmarkDistortion(const Config& config) {
       best_hamming_dists.push_back(best_hamming_dist);
       best_neighbor_dists.push_back(best_neighbor_dist);
     }
+    //write to output if we have nonzero verbosity 
+    if(config.verbosity){
+      printf("===== Attack result for example %d/%d Norm(%d)=%lf =====\n", i, config.num_point, config.norm_type, result.best_norms[config.norm_type]);
+      cout << "All Best Norms: " << result.ToNormString() << endl;
 
-    printf("===== Attack result for example %d/%d Norm(%d)=%lf =====\n", i, config.num_point, config.norm_type, result.best_norms[config.norm_type]);
-    cout << "All Best Norms: " << result.ToNormString() << endl;
-
-    cout << "Average Norms: ";
-    for (auto np : NeighborAttack::kAllowedNormTypes)
-      printf("Norm(%d)=%lf ", np, norm_sums[np] / actual_num_example);
-    cout << endl;
+      cout << "Average Norms: ";
+      for (auto np : NeighborAttack::kAllowedNormTypes)
+        printf("Norm(%d)=%lf ", np, norm_sums[np] / actual_num_example);
+      cout << endl;
+    }
 
     if (log_adv_training_examples) {
       for (auto p : result.hist_points) {
-        adv_training_examples.push_back(std::make_pair(data.first, p));
+        adv_examples->push_back(std::make_pair(data.first, p));
       }
     }
   }
@@ -180,13 +202,45 @@ void BenchmarkDistortion(const Config& config) {
   if (log_adv_training_examples) {
     FILE* fp;
     fp = fopen(config.adv_training_path.c_str(), "w");
-    for (auto p : adv_training_examples) {
+    for (auto p : *adv_examples) {
       fprintf(fp, "%d %s\n", p.first, p.second.ToDebugString().c_str());
     }
     fclose(fp);
   }
 
-  if (verify_hamming) {
+  return AdvExampleReturn{
+    .runtime = total_seconds,
+    .norm_sums = norm_sums,
+    .actual_num_examples = actual_num_example,
+    .best_norms = best_norms,
+    .best_hamming_dists = best_hamming_dists,
+    .best_neighbor_dists = best_neighbor_dists
+  };
+}
+
+void BenchmarkDistortion(const Config& config) {
+  using namespace std::chrono;
+  srand(0);
+
+  if(config.verbosity){//disable if not needed, takes some time to measure these metrics
+    Timing::Instance()->SetCollectHistogram(config.collect_histogram);
+  }
+  
+
+  if(!config.verbosity){
+    
+  }
+  std::vector<std::pair<int, Point>> adv_training_examples;
+  auto generate_output = GenerateAdvExamples(config, &adv_training_examples);
+  auto total_seconds = generate_output.runtime;
+  auto best_hamming_dists = generate_output.best_hamming_dists;
+  auto best_neighbor_dists = generate_output.best_neighbor_dists;
+  auto norm_sums = generate_output.norm_sums;
+  auto actual_num_example = generate_output.actual_num_examples;
+
+  bool verify_hamming = !config.milp_adv.empty();
+
+  if (verify_hamming && config.verbosity) {
     printf("Best Hamming Distance (max: %d, median: %d, mean: %.2lf): %s\n",
            Max(best_hamming_dists), Median(best_hamming_dists),
            Mean(best_hamming_dists), ToDebugString(best_hamming_dists).c_str());
@@ -195,21 +249,23 @@ void BenchmarkDistortion(const Config& config) {
            Mean(best_neighbor_dists),
            ToDebugString(best_neighbor_dists).c_str());
   }
-  cout << "==============================" << endl;
-  cout << "==============================" << endl;
-  cout << "==============================" << endl;
-  cout << "Results for config:" << config.config_path << endl;
-  cout << "Average Norms: ";
-  for (auto np : NeighborAttack::kAllowedNormTypes)
-    printf("Norm(%d)=%lf ", np, norm_sums[np] / actual_num_example);
-  cout << endl;
-  cout << "--- Timing Metrics ---" << endl;
-  cout << Timing::Instance()->CollectMetricsString();
+  if(config.verbosity){
+    cout << "==============================" << endl;
+    cout << "==============================" << endl;
+    cout << "==============================" << endl;
+    cout << "Results for config:" << config.config_path << endl;
+    cout << "Average Norms: ";
+    for (auto np : NeighborAttack::kAllowedNormTypes)
+      printf("Norm(%d)=%lf ", np, norm_sums[np] / actual_num_example);
+    cout << endl;
+    cout << "--- Timing Metrics ---" << endl;
+    cout << Timing::Instance()->CollectMetricsString();
 
-  cout << "## Actual Examples Tested:" << actual_num_example << endl;
-  cout << "## "
-       << "Time per point: " << total_seconds / actual_num_example << endl;
-}
+    cout << "## Actual Examples Tested:" << actual_num_example << endl;
+    cout << "## "
+        << "Time per point: " << total_seconds / actual_num_example << endl;
+  }
+};
 
 struct ModelStats {
   double test_accuracy;
@@ -269,6 +325,34 @@ void VerifyModelAccuracy() {
         model.c_str(), config.num_classes, model_stats.test_accuracy * 100,
         model_stats.num_test_examples, model_stats.num_trees);
   }
+}
+/*
+ * Calculates the attack distance required for each sample to be perturbed.
+ * Data, Model, config are set in config,
+ * order is a normal parameter: may be -1, 1, 2 (-1 is inf)
+ * 
+ * If order is not in given range, returns an empty vector.
+*/
+std::vector<double> AttackDistances(const Config& config, const int order){
+  //disturb all points until misclassification and calculate accuracy with those in radius epsilon
+  std::vector<double> distances;
+
+  if(std::find(NeighborAttack::kAllowedNormTypes.begin(), NeighborAttack::kAllowedNormTypes.end(), order) == NeighborAttack::kAllowedNormTypes.end()) return distances;//return empty if order is not allowed
+
+  auto attack = std::make_unique<NeighborAttack>(config);
+  attack->LoadForestFromJson(config.model_path);
+  auto parsed_data = cz::LoadSVMFile(config.inputs_path.c_str(),
+                                     config.num_features, config.feature_start);
+
+  //now perturb all the data, similarly to benchmark distortion
+  std::vector<std::pair<int, cz::Point>> perturbed_data;
+  auto generate_out = GenerateAdvExamples(config, &perturbed_data);
+
+  for(int i=0; i<generate_out.actual_num_examples;i++){
+    distances.push_back(generate_out.best_norms[i][order]);
+  }
+
+  return distances;
 }
 
 }  // namespace

@@ -121,7 +121,7 @@ struct Config {
     std::ifstream fin(config_path_in);
     nlohmann::json config_json;
     fin >> config_json;
-    cout << "Parsing config:" << config_json << endl;
+    
     config_path = config_path_in;
     inputs_path = config_json["inputs"];
     train_path = GetOr<std::string>(config_json, "train_data", "");
@@ -146,6 +146,13 @@ struct Config {
     binary_search_threshold =
         GetOr(config_json, "binary_search_threshold", 0.01);
     norm_weight = GetOr<double>(config_json, "norm_weight", 0.99999);
+
+    verbosity = GetOr<int8_t>(config_json, "verbosity", 0);
+
+    if (verbosity > 2) {
+      cout << "Parsing config:" << config_json << endl;
+    };
+    
 
     std::string mode_str =
         GetOr<std::string>(config_json, "search_mode", "lt-attack");
@@ -189,6 +196,7 @@ struct Config {
   bool enable_relaxed_boundary;
   bool enable_early_return;
   SearchMode search_mode;
+  int8_t verbosity;
 };
 
 class Point {

@@ -7,6 +7,6 @@
   "feature_start": 1,
   "num_point": 500,
   "num_attack_per_point": 20,
-  "norm_type": 2,
+  "norm_type": -1,
   "search_mode": "milp"
 }
