@@ -43,7 +43,6 @@ std::vector<std::pair<int, Point>> LoadSVMFile(const char* path,
 
   std::ifstream fin(path);
   std::string line;
-
   while (std::getline(fin, line)) {
     if (line.size() <= 2)
       break;
@@ -67,6 +66,26 @@ std::vector<std::pair<int, Point>> LoadSVMFile(const char* path,
 
   return std::move(parsed_data);
 }
+//basically the inverse of LoadSVMFile
+void WriteSVMFile(const std::string path, std::vector<std::pair<int, cz::Point>> const * data){
+  
+  std::ofstream fout(path, std::ios::binary);
+  std::string features;
+
+  std::for_each(data->begin(), data->end(), [&fout, &features](std::pair<int, cz::Point> label_sample){
+      //write line
+      u_int i = 0; //we probably will not run out of space here
+      for (const auto& iter : label_sample.second) {
+        features.append(" " + std::to_string(i) + ":" + std::to_string(iter));
+        i++;
+      }
+      //fout << Y 0:X_0 1:X_1 2:X_2 ... \n
+      fout << label_sample.first << features << endl;
+      features.clear();
+    }
+  );
+};
+
 
 double Clip(double v, double min_v, double max_v) {
   assert(min_v <= max_v);

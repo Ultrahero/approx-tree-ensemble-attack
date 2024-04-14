@@ -333,9 +333,10 @@ void VerifyModelAccuracy() {
  * 
  * If order is not in given range, returns an empty vector.
 */
-std::vector<double> AttackDistances(const Config& config, const int order){
+std::vector<double> AttackDistances(const Config& config){
   //disturb all points until misclassification and calculate accuracy with those in radius epsilon
   std::vector<double> distances;
+  const int order = config.norm_type;
 
   if(std::find(NeighborAttack::kAllowedNormTypes.begin(), NeighborAttack::kAllowedNormTypes.end(), order) == NeighborAttack::kAllowedNormTypes.end()) return distances;//return empty if order is not allowed
 
@@ -355,6 +356,13 @@ std::vector<double> AttackDistances(const Config& config, const int order){
   return distances;
 }
 
+void SaveAdvExamples(const Config& config){
+  std::vector<std::pair<int, cz::Point>> adv_examples;
+  GenerateAdvExamples(config, &adv_examples);
+  //write adv_examples as svm to path.
+  WriteSVMFile(config.outputs_path, &adv_examples);
+}
+
 }  // namespace
 
 }  // namespace cz
@@ -363,18 +371,34 @@ int main(int argc, char* argv[]) {
   if (argc != 2) {
     cout << "Usage: ./lt_attack configs/breast_cancer_robust_20x500_norm2_lt-attack.json"
          << endl;
+    cout << "\tOR" <<endl;
+    // cout << "./lt_attack verify <config> \t - verifies the accuracy on the given samples" <<endl;
+    cout << "./lt_attack distance <config> \t - computes the minimum attack distance per sample" <<endl;
+    cout << "./lt_attack examples <config> \t - generates adv examples" <<endl;
     return 0;
   }
+  //cout << "Using config:" << argv[1] << endl;
 
-  if (strcmp(argv[1], "verify") == 0) {
-    cout << "Verifing model accuracy..." << endl;
-    VerifyModelAccuracy();
-    return 0;
+  Config config;
+  if(argc == 2) config = *new Config(argv[1]);
+  else if (argc == 3) config = *new Config(argv[2]);
+
+  // if (strcmp(argv[1], "verify") == 0) {
+  //   cout << "Verifing model accuracy..." << endl;
+  //   VerifyModelAccuracy();
+  //   return 0;
+  // }
+
+  if (strcmp(argv[1], "distance") == 0){
+    //calculate distance
+    AttackDistances(config);
   }
 
-  cout << "Using config:" << argv[1] << endl;
+  else if (strcmp(argv[1], "examples") == 0){
+    //generates adv examples
+    SaveAdvExamples(config); //saves to path specified in config
+  }
 
-  Config config(argv[1]);
   BenchmarkDistortion(config);
   return 0;
 }

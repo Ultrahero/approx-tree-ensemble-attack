@@ -124,6 +124,7 @@ struct Config {
     
     config_path = config_path_in;
     inputs_path = config_json["inputs"];
+    outputs_path = config_json["outputs"];
     train_path = GetOr<std::string>(config_json, "train_data", "");
     model_path = config_json["model"];
     offset = GetOr(config_json, "offset", 0);
@@ -177,6 +178,7 @@ struct Config {
 
   std::string config_path;
   std::string inputs_path;
+  std::string outputs_path;
   std::string train_path;
   std::string model_path;
   std::string milp_adv;
@@ -427,6 +429,8 @@ struct DirectionHash {
 std::vector<std::pair<int, Point>> LoadSVMFile(const char* path,
                                              int feature_dim,
                                              int start_idx);
+
+void WriteSVMFile(const std::string path, std::vector<std::pair<int, Point>> const * data);
 
 int MaxIndex(const std::vector<double>& v, int except = -1);
 
