@@ -124,7 +124,7 @@ struct Config {
     
     config_path = config_path_in;
     inputs_path = config_json["inputs"];
-    outputs_path = config_json["outputs"];
+    outputs_path = GetOr<std::string>(config_json, "outputs", "");
     train_path = GetOr<std::string>(config_json, "train_data", "");
     model_path = config_json["model"];
     offset = GetOr(config_json, "offset", 0);
@@ -132,6 +132,8 @@ struct Config {
     num_attack_per_point = config_json["num_attack_per_point"];
     num_classes = config_json["num_classes"];
     num_features = config_json["num_features"];
+    save_all = GetOr(config_json, "save_all", true); //only has effect when saving adv examples
+    save_adv_examples = GetOr(config_json, "save_adv_examples", false);
 
     milp_adv = GetOr<std::string>(config_json, "milp_adv", "");
     adv_training_path =
@@ -183,6 +185,8 @@ struct Config {
   std::string model_path;
   std::string milp_adv;
   std::string adv_training_path;
+  bool save_all;
+  bool save_adv_examples;
   int offset;
   int num_point;
   int num_attack_per_point;
@@ -367,11 +371,14 @@ class Point {
     ss << std::fixed;
     ss << std::setprecision(11);
     for (int i = 0; i < data_.size(); ++i) {
-      if (data_[i] != 0.0) {
-        if (!ss.str().empty())
-          ss << " ";
-        ss << i << ":" << data_[i];
-      }
+      // if (data_[i] != 0.0) {
+      //   if (!ss.str().empty())
+      //     ss << " ";
+      //   ss << i << ":" << data_[i];
+      // }
+      if (!ss.str().empty())
+        ss << " ";
+      ss << i << ":" << data_[i];
     }
     return ss.str();
   }

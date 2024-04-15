@@ -48,15 +48,15 @@ struct AdvExampleReturn{
   std::map<int,double> norm_sums;
   int actual_num_examples;
   std::map<int,double>* best_norms;
-  std::vector<double> best_hamming_dists;
-  std::vector<double> best_neighbor_dists;
+  std::vector<int> best_hamming_dists;
+  std::vector<int> best_neighbor_dists;
 };
 
 /*
  * Generates Adversarial examples for the given config and writes them into the given vector adv_examples
  * Returns some stats on the process
 */
-AdvExampleReturn GenerateAdvExamples(const Config& config, std::vector<std::pair<int, Point>>* const adv_examples){
+AdvExampleReturn GenerateAdvExamples(const Config& config){
   using namespace std::chrono;
   srand(0);
 
@@ -73,8 +73,8 @@ AdvExampleReturn GenerateAdvExamples(const Config& config, std::vector<std::pair
 
   bool verify_hamming = !config.milp_adv.empty();
   std::map<int, std::vector<Point>> milp_adv;
-  std::vector<double> best_hamming_dists;
-  std::vector<double> best_neighbor_dists;
+  std::vector<int> best_hamming_dists;
+  std::vector<int> best_neighbor_dists;
   if (verify_hamming) {
     milp_adv = LoadMilpAdv(config.milp_adv);
     if(config.verbosity){
@@ -83,7 +83,7 @@ AdvExampleReturn GenerateAdvExamples(const Config& config, std::vector<std::pair
     }
   }
 
-  bool log_adv_training_examples = !config.adv_training_path.empty();
+  bool log_adv_training_examples = (!config.adv_training_path.empty() or !config.outputs_path.empty()) and config.save_adv_examples;
 
   Timing::Instance()->StartTimer("Total Time");
   auto start_timer = high_resolution_clock::now();
@@ -96,7 +96,8 @@ AdvExampleReturn GenerateAdvExamples(const Config& config, std::vector<std::pair
   std::map<int,double> best_dist;
   int max_row =
       std::min((int)parsed_data.size(), config.offset + config.num_point);
-  std::map<int, double> best_norms[max_row - config.offset];
+  std::map<int, double> best_norms[max_row - config.offset+1];
+  std::vector<std::pair<int, Point>> adv_examples;
   for (int row = config.offset; row < max_row; ++row) {
     int i = row - config.offset + 1;
 
@@ -110,6 +111,8 @@ AdvExampleReturn GenerateAdvExamples(const Config& config, std::vector<std::pair
           << endl;
       if (data.first != y_pred) {
         cout << "Mis-classified point, skipping...";
+        adv_examples.push_back(std::move(std::make_pair(-1, data.second))); //save the example but with -1 label to know it was already misclassified
+        best_norms[i] = std::move(std::map<int, double>({{-1,0.0}, {1,0.0}, {2,0.0}})); //set norms to 0 as already misclassified
         continue;
       }
       cout << "Correctly classified point, attacking...";
@@ -187,9 +190,14 @@ AdvExampleReturn GenerateAdvExamples(const Config& config, std::vector<std::pair
       cout << endl;
     }
 
+
     if (log_adv_training_examples) {
-      for (auto p : result.hist_points) {
-        adv_examples->push_back(std::make_pair(data.first, p));
+      if(config.save_all){
+        for (auto p : result.hist_points) {
+        adv_examples.push_back(std::move(std::make_pair(data.first, p))); //save all points from all threads
+        }
+      }else{
+        adv_examples.push_back(std::move(std::make_pair(data.first, result.best_points[config.norm_type]))); //save only the best example for our norm
       }
     }
   }
@@ -200,14 +208,15 @@ AdvExampleReturn GenerateAdvExamples(const Config& config, std::vector<std::pair
   Timing::Instance()->EndTimer("Total Time");
 
   if (log_adv_training_examples) {
+    printf("\n\nWriting the generated adversarial examples to %s\n", config.outputs_path.c_str() );
     FILE* fp;
-    fp = fopen(config.adv_training_path.c_str(), "w");
-    for (auto p : *adv_examples) {
+    fp = fopen(config.outputs_path.c_str(), "w+");
+    for (auto p : adv_examples) {
       fprintf(fp, "%d %s\n", p.first, p.second.ToDebugString().c_str());
     }
     fclose(fp);
   }
-
+  // *best_norms = std::move(*best_norms);
   return AdvExampleReturn{
     .runtime = total_seconds,
     .norm_sums = norm_sums,
@@ -230,8 +239,7 @@ void BenchmarkDistortion(const Config& config) {
   if(!config.verbosity){
     
   }
-  std::vector<std::pair<int, Point>> adv_training_examples;
-  auto generate_output = GenerateAdvExamples(config, &adv_training_examples);
+  auto generate_output = GenerateAdvExamples(config);
   auto total_seconds = generate_output.runtime;
   auto best_hamming_dists = generate_output.best_hamming_dists;
   auto best_neighbor_dists = generate_output.best_neighbor_dists;
@@ -346,21 +354,21 @@ std::vector<double> AttackDistances(const Config& config){
                                      config.num_features, config.feature_start);
 
   //now perturb all the data, similarly to benchmark distortion
-  std::vector<std::pair<int, cz::Point>> perturbed_data;
-  auto generate_out = GenerateAdvExamples(config, &perturbed_data);
 
-  for(int i=0; i<generate_out.actual_num_examples;i++){
+  auto generate_out = GenerateAdvExamples(config);
+
+  for(int i=0; i<config.num_point - config.offset;i++){
     distances.push_back(generate_out.best_norms[i][order]);
   }
 
   return distances;
 }
 
-void SaveAdvExamples(const Config& config){
-  std::vector<std::pair<int, cz::Point>> adv_examples;
-  GenerateAdvExamples(config, &adv_examples);
+void SaveAdvExamples(Config& config){
+  config.save_adv_examples = true;
+  GenerateAdvExamples(config);
   //write adv_examples as svm to path.
-  WriteSVMFile(config.outputs_path, &adv_examples);
+  //WriteSVMFile(config.outputs_path, &adv_examples); saving is handled in Generate
 }
 
 }  // namespace
@@ -368,7 +376,7 @@ void SaveAdvExamples(const Config& config){
 }  // namespace cz
 
 int main(int argc, char* argv[]) {
-  if (argc != 2) {
+  if (argc < 2) {
     cout << "Usage: ./lt_attack configs/breast_cancer_robust_20x500_norm2_lt-attack.json"
          << endl;
     cout << "\tOR" <<endl;
@@ -380,25 +388,49 @@ int main(int argc, char* argv[]) {
   //cout << "Using config:" << argv[1] << endl;
 
   Config config;
-  if(argc == 2) config = *new Config(argv[1]);
-  else if (argc == 3) config = *new Config(argv[2]);
+  if(argc == 2) config = Config(argv[1]);
+  else if (argc >= 3) config = Config(argv[2]);
 
   // if (strcmp(argv[1], "verify") == 0) {
   //   cout << "Verifing model accuracy..." << endl;
   //   VerifyModelAccuracy();
   //   return 0;
   // }
-
-  if (strcmp(argv[1], "distance") == 0){
-    //calculate distance
-    AttackDistances(config);
+  if(argc>=3){
+    if (strcmp(argv[1], "distance") == 0){
+      //calculate distance
+      auto distances = AttackDistances(config);
+      if(config.verbosity) cout << "Generated adv examples with distances" << endl;
+      //write the result to config.outputs_path
+      std::ofstream fout(config.outputs_path);
+      if(!fout.is_open()){
+        cout << "ERROR: Tried writing to file " << config.outputs_path << " but file could not be opened." << endl;
+        return 2;
+      }
+      for(auto d : distances){
+        fout << std::to_string(d) + "\n";
+      }
+      
+      fout.close();
+      return 0;
+    }
+    else if (strcmp(argv[1], "examples") == 0){
+      //generates adv examples
+      SaveAdvExamples(config); //saves to path specified in config
+      return 0;
+    }
+    else {
+      cout << "Unknown command `" << argv[1] <<"`. Will exit here."<< endl;
+      cout << "Usage: ./lt_attack configs/breast_cancer_robust_20x500_norm2_lt-attack.json"
+         << endl;
+      cout << "\tOR" <<endl;
+      // cout << "./lt_attack verify <config> \t - verifies the accuracy on the given samples" <<endl;
+      cout << "./lt_attack distance <config> \t - computes the minimum attack distance per sample" <<endl;
+      cout << "./lt_attack examples <config> \t - generates adv examples" <<endl;
+      return 1;
+    }
+  }else{
+    BenchmarkDistortion(config);
+    return 0;
   }
-
-  else if (strcmp(argv[1], "examples") == 0){
-    //generates adv examples
-    SaveAdvExamples(config); //saves to path specified in config
-  }
-
-  BenchmarkDistortion(config);
-  return 0;
 }

@@ -25,8 +25,8 @@ decision_forest_test: $(OBJS) decision_forest_test.o
 lt_attack: $(OBJS) lt_attack.o
 	$(CC) -o $@ $^ $(CFLAGS)
 
-debug_lt_attack: $(DEBUG_OBJS) debug_lt_attack.o
+debug_lt_attack: $(DEBUG_OBJS) lt_attack.o
 	$(CC) -o $@ $^ $(DEBUG_CFLAGS)
 
 clean:
-	rm -f *.o decision_forest_test lt_attack debug_lt_attack
+	rm -f *.o decision_forest_test lt_attack
