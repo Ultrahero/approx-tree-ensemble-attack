@@ -10,5 +10,6 @@
   "num_attack_per_point": 20,
   "norm_type": -1,
   "search_mode": "lt-attack",
-  "verbosity":1
+  "verbosity":1,
+  "outputs": "out/results.txt"
 }

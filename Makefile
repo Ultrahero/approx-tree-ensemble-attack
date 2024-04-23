@@ -15,7 +15,7 @@ debug_%.o: %.cc $(DEPS)
 
 all: lt_attack
 
-debug: debug_lt_attack
+debug: lt_attack
 
 test: decision_forest_test
 
@@ -29,4 +29,4 @@ debug_lt_attack: $(DEBUG_OBJS) lt_attack.o
 	$(CC) -o $@ $^ $(DEBUG_CFLAGS)
 
 clean:
-	rm -f *.o decision_forest_test lt_attack
+	rm -f *.o decision_forest_test lt_attack 

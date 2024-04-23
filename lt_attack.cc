@@ -119,9 +119,12 @@ AdvExampleReturn GenerateAdvExamples(const Config& config){
       cout << "Progress " << i << "/" << config.num_point
           << endl;
     }else{
-      if(data.first != y_pred) continue;
+      if(data.first != y_pred) {
+        if(log_adv_training_examples) adv_examples.push_back(std::move(std::make_pair(-1, data.second))); //save the example but with -1 label to know it was already misclassified
+        best_norms[i] = std::move(std::map<int, double>({{-1,0.0}, {1,0.0}, {2,0.0}})); //set norms to 0 as already misclassified
+        continue;
+      };
     }
-    
 
     auto result = attack->FindAdversarialPoint(data.second);
     bool is_success = result.success();
@@ -194,7 +197,7 @@ AdvExampleReturn GenerateAdvExamples(const Config& config){
     if (log_adv_training_examples) {
       if(config.save_all){
         for (auto p : result.hist_points) {
-        adv_examples.push_back(std::move(std::make_pair(data.first, p))); //save all points from all threads
+          adv_examples.push_back(std::move(std::make_pair(data.first, p))); //save all points from all threads
         }
       }else{
         adv_examples.push_back(std::move(std::make_pair(data.first, result.best_points[config.norm_type]))); //save only the best example for our norm
@@ -208,7 +211,7 @@ AdvExampleReturn GenerateAdvExamples(const Config& config){
   Timing::Instance()->EndTimer("Total Time");
 
   if (log_adv_training_examples) {
-    printf("\n\nWriting the generated adversarial examples to %s\n", config.outputs_path.c_str() );
+    printf("\n\nWriting %ld generated adversarial examples to %s\n", adv_examples.size(), config.outputs_path.c_str() );
     FILE* fp;
     fp = fopen(config.outputs_path.c_str(), "w+");
     for (auto p : adv_examples) {
@@ -348,13 +351,7 @@ std::vector<double> AttackDistances(const Config& config){
 
   if(std::find(NeighborAttack::kAllowedNormTypes.begin(), NeighborAttack::kAllowedNormTypes.end(), order) == NeighborAttack::kAllowedNormTypes.end()) return distances;//return empty if order is not allowed
 
-  auto attack = std::make_unique<NeighborAttack>(config);
-  attack->LoadForestFromJson(config.model_path);
-  auto parsed_data = cz::LoadSVMFile(config.inputs_path.c_str(),
-                                     config.num_features, config.feature_start);
-
   //now perturb all the data, similarly to benchmark distortion
-
   auto generate_out = GenerateAdvExamples(config);
 
   for(int i=0; i<config.num_point - config.offset;i++){
@@ -366,7 +363,8 @@ std::vector<double> AttackDistances(const Config& config){
 
 void SaveAdvExamples(Config& config){
   config.save_adv_examples = true;
-  GenerateAdvExamples(config);
+  auto ret = GenerateAdvExamples(config);
+  // cout << std::to_string(ret.actual_num_examples) << endl;
   //write adv_examples as svm to path.
   //WriteSVMFile(config.outputs_path, &adv_examples); saving is handled in Generate
 }
@@ -388,9 +386,18 @@ int main(int argc, char* argv[]) {
   //cout << "Using config:" << argv[1] << endl;
 
   Config config;
+  bool debug = false;
   if(argc == 2) config = Config(argv[1]);
   else if (argc >= 3) config = Config(argv[2]);
 
+  if(config.verbosity or debug){
+    cout << "Config looks like:"<<endl;
+    cout << "\t num_points: "<< std::to_string(config.num_point).c_str() << endl;
+    cout << "\t feature count: " << std::to_string(config.num_features).c_str() << endl; 
+    cout << "\t outputspath: " << config.outputs_path.c_str() << endl;
+    cout << "\t model: " << config.model_path.c_str() << endl;
+  }
+    
   // if (strcmp(argv[1], "verify") == 0) {
   //   cout << "Verifing model accuracy..." << endl;
   //   VerifyModelAccuracy();
@@ -400,7 +407,7 @@ int main(int argc, char* argv[]) {
     if (strcmp(argv[1], "distance") == 0){
       //calculate distance
       auto distances = AttackDistances(config);
-      if(config.verbosity) cout << "Generated adv examples with distances" << endl;
+      if(config.verbosity) cout << "Generated adv examples with distances, count is:" << std::to_string(distances.size()) << ". Writing the distances to "<< config.outputs_path.c_str() << endl;
       //write the result to config.outputs_path
       std::ofstream fout(config.outputs_path);
       if(!fout.is_open()){
@@ -410,8 +417,9 @@ int main(int argc, char* argv[]) {
       for(auto d : distances){
         fout << std::to_string(d) + "\n";
       }
-      
+
       fout.close();
+      
       return 0;
     }
     else if (strcmp(argv[1], "examples") == 0){

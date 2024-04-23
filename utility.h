@@ -132,7 +132,7 @@ struct Config {
     num_attack_per_point = config_json["num_attack_per_point"];
     num_classes = config_json["num_classes"];
     num_features = config_json["num_features"];
-    save_all = GetOr(config_json, "save_all", true); //only has effect when saving adv examples
+    save_all = GetOr(config_json, "save_all", false); //only has effect when saving adv examples
     save_adv_examples = GetOr(config_json, "save_adv_examples", false);
 
     milp_adv = GetOr<std::string>(config_json, "milp_adv", "");

@@ -1291,7 +1291,7 @@ std::pair<bool, Point> NeighborAttack::NormalRandomPoint(int victim_label,
   const int len = ref_point.Size();
   Point p(len);
 
-  int max_try = 300;
+  int max_try = 20*len;
   while (max_try > 0) {
     --max_try;
     for (int i = 0; i < len; ++i) {
@@ -1305,10 +1305,10 @@ std::pair<bool, Point> NeighborAttack::NormalRandomPoint(int victim_label,
   }
   Timing::Instance()->EndTimer("NormalRandomPoint");
 
-  printf(
-      "NormalRandomPoint failed after 300 trials for victim_label: %d. "
-      "fallback to FeatureSplitsRandomPoint.\n",
-      victim_label);
+  // printf(
+  //     "NormalRandomPoint failed after 500 trials for victim_label: %d. "
+  //     "fallback to FeatureSplitsRandomPoint.\n",
+  //     victim_label);
   return FeatureSplitsRandomPoint(victim_label, ref_point, rseed);
 }
 
@@ -1341,7 +1341,7 @@ std::pair<bool, Point> NeighborAttack::FeatureSplitsRandomPoint(
   }
 
   Timing::Instance()->EndTimer("FeatureSplitsRandomPoint");
-
+  printf("Escalation for finding misclassified unoptimized points failed.");
   return std::make_pair(false, Point());
 }
 
